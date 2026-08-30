@@ -1,0 +1,13 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# 测试临时文件
+tests/_tmp_*/
+*.broken
+
+# 系统
+Thumbs.db
+.DS_Store
