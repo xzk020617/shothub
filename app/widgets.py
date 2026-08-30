@@ -1,4 +1,4 @@
-"""UI 组件：流式布局、缩略图卡片、空状态。
+"""UI 组件：流式布局、缩略图卡片、空状态、托盘图标。
 
 对应 Plan.md 第 3 节中的 ThumbnailGrid / ThumbnailCard / EmptyState。
 """
@@ -6,8 +6,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QMimeData, QPoint, QRect, QSize, Qt, QUrl, Signal
-from PySide6.QtGui import QDrag, QPixmap
+from PySide6.QtCore import QMimeData, QPoint, QPointF, QRect, QRectF, QSize, Qt, QUrl, Signal
+from PySide6.QtGui import QColor, QDrag, QIcon, QPainter, QPen, QPixmap, QPolygonF
 from PySide6.QtWidgets import (
     QApplication,
     QFrame,
@@ -32,6 +32,44 @@ def build_file_mimedata(file_path: str) -> QMimeData:
     mime = QMimeData()
     mime.setUrls([QUrl.fromLocalFile(file_path)])
     return mime
+
+
+def build_tray_icon(size: int = 64) -> QIcon:
+    """程序化绘制托盘图标：蓝底圆角 + 白色"照片"图形（纯几何，不依赖字体）。"""
+    pm = QPixmap(size, size)
+    pm.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pm)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+    # 蓝底圆角方块
+    painter.setBrush(QColor("#6d8dff"))
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.drawRoundedRect(2, 2, size - 4, size - 4, size * 0.22, size * 0.22)
+
+    white = QColor("white")
+    u = size / 64.0  # 以 64px 为基准的比例尺
+
+    # 相框
+    pen = QPen(white)
+    pen.setWidthF(4.5 * u)
+    painter.setPen(pen)
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawRoundedRect(
+        QRectF(14 * u, 16 * u, 36 * u, 32 * u), 3 * u, 3 * u
+    )
+    # 太阳（左上角小圆点）
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(white)
+    painter.drawEllipse(QPointF(23 * u, 25 * u), 3.5 * u, 3.5 * u)
+    # 山（底部三角）
+    mountain = QPolygonF(
+        [QPointF(18 * u, 44 * u), QPointF(30 * u, 30 * u),
+         QPointF(38 * u, 40 * u), QPointF(43 * u, 34 * u), QPointF(48 * u, 44 * u)]
+    )
+    painter.drawPolygon(mountain)
+
+    painter.end()
+    return QIcon(pm)
 
 
 class FlowLayout(QLayout):
