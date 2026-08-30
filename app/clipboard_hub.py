@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import hashlib
 import time
 from io import BytesIO
 from pathlib import Path
@@ -21,14 +22,15 @@ from PySide6.QtGui import QGuiApplication, QImage
 
 CLIPBOARD_OPEN_RETRIES = 5
 CLIPBOARD_RETRY_INTERVAL = 0.05
+DUPE_WINDOW_SECONDS = 2.0  # 同一图片在此时间窗内重复出现视为同一次截图
 
 
 class ClipboardError(Exception):
     """剪贴板读写失败。"""
 
 
-def qimage_to_pil(qimg: QImage) -> Image.Image:
-    """QImage → PIL Image（经 PNG 中转，保留透明通道）。"""
+def qimage_to_png_bytes(qimg: QImage) -> bytes:
+    """QImage → PNG 字节。"""
     ba = QByteArray()
     buf = QBuffer(ba)
     buf.open(QIODevice.OpenModeFlag.WriteOnly)
@@ -36,7 +38,12 @@ def qimage_to_pil(qimg: QImage) -> Image.Image:
         buf.close()
         raise ClipboardError("剪贴板图片解码失败")
     buf.close()
-    im = Image.open(BytesIO(bytes(ba)))
+    return bytes(ba)
+
+
+def qimage_to_pil(qimg: QImage) -> Image.Image:
+    """QImage → PIL Image（经 PNG 中转，保留透明通道）。"""
+    im = Image.open(BytesIO(qimage_to_png_bytes(qimg)))
     im.load()
     return im
 
@@ -68,6 +75,10 @@ class ClipboardHub(QObject):
         self._clipboard = clipboard or QGuiApplication.clipboard()
         self._seq = seq_provider or win32clipboard.GetClipboardSequenceNumber
         self._own_seq: Optional[int] = None
+        self._last_seq: Optional[int] = None
+        self._last_hash: Optional[str] = None
+        self._last_capture_at: float = 0.0
+        self.dupe_window: float = DUPE_WINDOW_SECONDS
         self._listening = False
 
     # ---------- 监听入库 ----------
@@ -87,8 +98,13 @@ class ClipboardHub(QObject):
             seq = self._seq()
         except Exception:
             seq = None
-        if seq is not None and seq == self._own_seq:
-            return  # 自己写出去的，忽略
+        # 第一道去重：剪贴板序号。同一序号的事件直接跳过；
+        # 截图工具一次写入多个格式可能触发多次事件、每次序号还不同，
+        # 所以仅靠序号不够，下面还有第二道内容指纹去重
+        if seq is not None:
+            if seq == self._own_seq or seq == self._last_seq:
+                return
+            self._last_seq = seq
         mime = self._clipboard.mimeData()
         if not mime.hasImage():
             return  # 剪贴板里是文字/文件，静默忽略
@@ -96,9 +112,36 @@ class ClipboardHub(QObject):
         if qimg.isNull():
             return
         try:
-            self.imageCaptured.emit(qimage_to_pil(qimg))
+            png_bytes = qimage_to_png_bytes(qimg)
         except ClipboardError as exc:
             self.clipboardError.emit(str(exc))
+            return
+        # 第二道去重：内容指纹 + 时间窗（挡住同一次截图的重复事件）
+        digest = hashlib.md5(png_bytes).hexdigest()
+        now = time.monotonic()
+        if (
+            digest == self._last_hash
+            and now - self._last_capture_at < self.dupe_window
+        ):
+            return
+        self._last_hash = digest
+        self._last_capture_at = now
+        im = Image.open(BytesIO(png_bytes))
+        im.load()
+        self.imageCaptured.emit(im)
+
+    # ---------- 直读剪贴板（Ctrl+V 粘贴用） ----------
+
+    def clipboard_mime(self):
+        """当前剪贴板的 mimeData（调用方自行判断 hasUrls/hasImage）。"""
+        return self._clipboard.mimeData()
+
+    def clipboard_image_pil(self) -> Optional[Image.Image]:
+        """直读剪贴板图片为 PIL Image；无图片返回 None。"""
+        qimg = self._clipboard.image()
+        if qimg.isNull():
+            return None
+        return qimage_to_pil(qimg)
 
     # ---------- 写回剪贴板 ----------
 

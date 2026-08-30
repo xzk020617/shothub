@@ -8,6 +8,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
@@ -23,7 +24,7 @@ from PySide6.QtWidgets import (
 
 from .clipboard_hub import ClipboardError, ClipboardHub
 from .storage import StorageManager, StorageError
-from .widgets import EmptyState, FlowLayout, ThumbnailCard
+from .widgets import IMAGE_SUFFIXES, EmptyState, FlowLayout, ThumbnailCard
 
 IMAGE_FILTER = "图片文件 (*.png *.jpg *.jpeg *.bmp *.gif *.webp);;所有文件 (*)"
 
@@ -109,6 +110,16 @@ class MainWindow(QMainWindow):
         )
         self.hub.start()
 
+        # ---------- 拖入 / 粘贴 ----------
+        self.setAcceptDrops(True)
+        QShortcut(QKeySequence.StandardKey.Paste, self, activated=self._on_paste)
+        self.drop_overlay = QLabel("", central)
+        self.drop_overlay.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.drop_overlay.setAttribute(
+            Qt.WidgetAttribute.WA_TransparentForMouseEvents
+        )  # 遮罩不拦截拖放事件
+        self.drop_overlay.hide()
+
     # ---------- 卡片管理 ----------
 
     def _add_card(self, item) -> None:
@@ -153,16 +164,142 @@ class MainWindow(QMainWindow):
         )
         if not paths:
             return
+        _, failed = self._import_files([Path(p) for p in paths], source="picker")
+        if failed:
+            QMessageBox.warning(self, "部分图片添加失败", "\n".join(failed))
+
+    def _import_files(self, paths, source: str) -> tuple[int, list[str]]:
+        """统一的文件入库入口：添加按钮 / 拖入 / 粘贴共用。返回 (成功数, 失败信息)。"""
+        added = 0
         failed: list[str] = []
         for p in paths:  # 每次插入列表头部，最后添加的排在最前
             try:
-                item = self.storage.save_from_file(Path(p), source="picker")
+                item = self.storage.save_from_file(Path(p), source=source)
                 self._add_card(item)
+                added += 1
             except StorageError as exc:
                 failed.append(str(exc))
         self._refresh_state()
-        if failed:
-            QMessageBox.warning(self, "部分图片添加失败", "\n".join(failed))
+        return added, failed
+
+    def _import_clipboard_image(self, source: str) -> bool:
+        """把剪贴板里的图片直读入库（Ctrl+V / 拖入位图数据）。"""
+        try:
+            image = self.hub.clipboard_image_pil()
+        except ClipboardError as exc:
+            self.statusBar().showMessage(str(exc), 4000)
+            return False
+        if image is None:
+            self.statusBar().showMessage("剪贴板里没有图片", 2500)
+            return False
+        try:
+            item = self.storage.save_image(image, source=source)
+        except StorageError as exc:
+            self.statusBar().showMessage(f"入库失败：{exc}", 4000)
+            return False
+        self._add_card(item)
+        self._refresh_state()
+        self.statusBar().showMessage(f"已添加 {item.width}×{item.height}", 2500)
+        return True
+
+    def _on_paste(self) -> None:
+        """Ctrl+V：优先按文件导入（资源管理器复制的图片），否则按位图导入。"""
+        mime = self.hub.clipboard_mime()
+        if mime.hasUrls():
+            paths = [
+                Path(u.toLocalFile())
+                for u in mime.urls()
+                if u.isLocalFile()
+                and Path(u.toLocalFile()).suffix.lower() in IMAGE_SUFFIXES
+            ]
+            if paths:
+                added, failed = self._import_files(paths, source="paste")
+                msg = f"已粘贴添加 {added} 张"
+                if failed:
+                    msg += f"，{len(failed)} 个失败"
+                self.statusBar().showMessage(msg, 3000)
+                return
+        if mime.hasImage():
+            self._import_clipboard_image(source="paste")
+
+    # ---------- 拖入（drag & drop） ----------
+
+    @staticmethod
+    def _classify_drop(mime) -> str:
+        """分类拖入内容：files=本地图片文件，image=位图数据，reject=不支持。"""
+        if mime.hasUrls():
+            for url in mime.urls():
+                if (
+                    url.isLocalFile()
+                    and Path(url.toLocalFile()).suffix.lower() in IMAGE_SUFFIXES
+                ):
+                    return "files"
+            return "reject"
+        if mime.hasImage():
+            return "image"
+        return "reject"
+
+    def _show_drop_overlay(self, text: str, valid: bool) -> None:
+        color = "#6d8dff" if valid else "#e05555"
+        self.drop_overlay.setStyleSheet(
+            f"background: rgba(109,141,255,40); border: 2px dashed {color};"
+            f" border-radius: 12px; color: {color};"
+            " font-size: 18px; font-weight: bold;"
+        )
+        self.drop_overlay.setText(text)
+        self.drop_overlay.setGeometry(
+            self.centralWidget().rect().adjusted(12, 12, -12, -12)
+        )
+        self.drop_overlay.show()
+        self.drop_overlay.raise_()
+
+    def dragEnterEvent(self, event) -> None:
+        self._handle_drag_enter(event.mimeData(), event)
+
+    def _handle_drag_enter(self, mime, event) -> None:
+        """dragEnter 逻辑（与 Qt 事件解耦，便于测试）。"""
+        kind = self._classify_drop(mime)
+        if kind == "reject":
+            self._show_drop_overlay("仅支持图片文件", valid=False)
+            event.ignore()
+            return
+        event.acceptProposedAction()
+        self._show_drop_overlay(
+            "松开以添加图片" if kind == "files" else "松开以粘贴图片",
+            valid=True,
+        )
+
+    def dragLeaveEvent(self, event) -> None:
+        self.drop_overlay.hide()
+        super().dragLeaveEvent(event)
+
+    def dropEvent(self, event) -> None:
+        self._handle_drop(event.mimeData(), event)
+
+    def _handle_drop(self, mime, event) -> None:
+        """drop 逻辑（与 Qt 事件解耦，便于测试）。"""
+        self.drop_overlay.hide()
+        kind = self._classify_drop(mime)
+        if kind == "files":
+            paths = [
+                Path(u.toLocalFile())
+                for u in mime.urls()
+                if u.isLocalFile()
+                and Path(u.toLocalFile()).suffix.lower() in IMAGE_SUFFIXES
+            ]
+            added, failed = self._import_files(paths, source="dragin")
+            msg = f"已添加 {added} 张"
+            if failed:
+                msg += f"，{len(failed)} 个失败"
+            self.statusBar().showMessage(msg, 3000)
+            event.acceptProposedAction()
+        elif kind == "image":
+            if self._import_clipboard_image(source="dragin"):
+                event.acceptProposedAction()
+            else:
+                event.ignore()
+        else:
+            event.ignore()
 
     def _on_delete(self, item_id: str) -> None:
         if self.storage.delete(item_id):
