@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 from PySide6.QtCore import QMimeData, QPoint, QPointF, QRect, QRectF, QSize, Qt, QUrl, Signal
@@ -70,6 +71,21 @@ def build_tray_icon(size: int = 64) -> QIcon:
 
     painter.end()
     return QIcon(pm)
+
+
+def app_icon() -> QIcon:
+    """应用图标：优先用 assets/icon.ico（源码目录或 PyInstaller 包内），
+    缺失时回退到程序化几何图标。"""
+    candidates = []
+    if getattr(sys, "frozen", False):  # PyInstaller 打包后的运行环境
+        candidates.append(Path(sys._MEIPASS) / "assets" / "icon.ico")
+    candidates.append(Path(__file__).resolve().parent.parent / "assets" / "icon.ico")
+    for p in candidates:
+        if p.exists():
+            icon = QIcon(str(p))
+            if not icon.isNull():
+                return icon
+    return build_tray_icon()
 
 
 class FlowLayout(QLayout):

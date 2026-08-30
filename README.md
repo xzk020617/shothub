@@ -21,6 +21,29 @@ python -m venv .venv
 
 要求：Windows + Python 3.12。数据存放在 `%LOCALAPPDATA%\ShotHub\`。
 
+## 打包与安装（Windows）
+
+```bash
+.venv\Scripts\pip install pyinstaller
+.venv\Scripts\python -m PyInstaller --noconfirm --noconsole --onefile \
+  --name ShotHub --icon assets/icon.ico --add-data "assets/icon.ico;assets" main.py
+# 产物：dist\ShotHub.exe（单文件，约 52MB）
+```
+
+安装到系统（复制 exe 到 `%LOCALAPPDATA%\ShotHub\bin\` 并创建开始菜单快捷方式）：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\install.ps1
+```
+
+开机自启（写入当前用户注册表 Run 键）：
+
+```powershell
+reg add "HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Run" /v ShotHub /t REG_SZ /d "\"%LOCALAPPDATA%\ShotHub\bin\ShotHub.exe\"" /f
+```
+
+图标由 `scripts/make_icon.py` 程序化生成（渐变圆角方块 + 相框 + 环绕箭头）。
+
 ## 测试
 
 ```bash
@@ -43,5 +66,9 @@ app/
   clipboard_hub.py    # 剪贴板监听 + 去重 + 自我过滤 + 双格式写回
   widgets.py          # FlowLayout / ThumbnailCard / EmptyState / 托盘图标
   mainwindow.py       # 主窗口 + 托盘
+scripts/
+  make_icon.py        # 程序化生成应用图标（icon.ico）
+  install.ps1         # 安装 exe + 开始菜单快捷方式
+ShotHub.spec          # PyInstaller 打包配置
 tests/                # 离屏冒烟测试（77 项）
 ```
