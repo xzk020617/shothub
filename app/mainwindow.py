@@ -1,7 +1,7 @@
-"""主窗口：顶栏 + 缩略图网格 + 空状态。
+"""主窗口：顶栏 + 缩略图网格 + 空状态 + 系统托盘。
 
-第 1 步范围：手动添加（文件选择）、单张删除、一键清空、退出清理。
-剪贴板监听（第 2 步）、拖拽（第 3 步）、托盘（第 4 步）后续接入。
+功能：手动添加、单张删除、一键清空、剪贴板监听捕获、复制出去、
+拖入/拖出、Ctrl+V 粘贴、托盘常驻（关窗口最小化）、退出清理。
 """
 from __future__ import annotations
 
@@ -10,21 +10,24 @@ from pathlib import Path
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
+    QApplication,
     QFileDialog,
     QHBoxLayout,
     QLabel,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QPushButton,
     QScrollArea,
     QStackedLayout,
+    QSystemTrayIcon,
     QVBoxLayout,
     QWidget,
 )
 
 from .clipboard_hub import ClipboardError, ClipboardHub
 from .storage import StorageManager, StorageError
-from .widgets import IMAGE_SUFFIXES, EmptyState, FlowLayout, ThumbnailCard
+from .widgets import IMAGE_SUFFIXES, EmptyState, FlowLayout, ThumbnailCard, build_tray_icon
 
 IMAGE_FILTER = "图片文件 (*.png *.jpg *.jpeg *.bmp *.gif *.webp);;所有文件 (*)"
 
@@ -119,6 +122,11 @@ class MainWindow(QMainWindow):
             Qt.WidgetAttribute.WA_TransparentForMouseEvents
         )  # 遮罩不拦截拖放事件
         self.drop_overlay.hide()
+
+        # ---------- 系统托盘 ----------
+        self._force_quit = False
+        self._tray_hint_shown = False
+        self.tray = self._create_tray()  # 无系统托盘环境时为 None
 
     # ---------- 卡片管理 ----------
 
@@ -349,9 +357,68 @@ class MainWindow(QMainWindow):
         except (ClipboardError, OSError) as exc:
             self.statusBar().showMessage(f"复制失败：{exc}", 4000)
 
-    # ---------- 退出清理 ----------
+    # ---------- 系统托盘 ----------
+
+    def _create_tray(self) -> QSystemTrayIcon | None:
+        """创建托盘图标与菜单；系统无托盘区时返回 None（退化为关闭即退出）。"""
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            return None
+        tray = QSystemTrayIcon(self)
+        tray.setIcon(build_tray_icon())
+        tray.setToolTip("截图中转站")
+
+        menu = QMenu()
+        act_show = menu.addAction("显示主窗口")
+        act_show.triggered.connect(self.show_and_raise)
+        act_clear = menu.addAction("清空全部")
+        act_clear.triggered.connect(self._on_clear)
+        menu.addSeparator()
+        act_quit = menu.addAction("退出")
+        act_quit.triggered.connect(self.quit_app)
+        tray.setContextMenu(menu)
+
+        tray.activated.connect(self._on_tray_activated)
+        tray.show()
+        return tray
+
+    def _on_tray_activated(self, reason) -> None:
+        if reason in (
+            QSystemTrayIcon.ActivationReason.DoubleClick,
+            QSystemTrayIcon.ActivationReason.Trigger,
+        ):
+            self.show_and_raise()
+
+    def show_and_raise(self) -> None:
+        """从托盘/单实例唤起主窗口。"""
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+
+    def quit_app(self) -> None:
+        """托盘「退出」：真正的退出入口，清理未保留截图。"""
+        self._force_quit = True
+        self.storage.cleanup_unpinned()
+        if self.tray is not None:
+            self.tray.hide()
+        QApplication.quit()
+
+    # ---------- 关闭 = 最小化到托盘 ----------
 
     def closeEvent(self, event) -> None:
-        # 托盘常驻在第 4 步接入；当前关闭即退出，清理未保留截图
-        self.storage.cleanup_unpinned()
-        super().closeEvent(event)
+        if self._force_quit or self.tray is None:
+            # 无托盘环境或显式退出：关闭即退出，清理未保留截图
+            self.storage.cleanup_unpinned()
+            event.accept()
+            QApplication.quit()
+            return
+        # 有托盘：关窗口只是隐藏，后台继续捕获截图
+        event.ignore()
+        self.hide()
+        if not self._tray_hint_shown:
+            self._tray_hint_shown = True
+            self.tray.showMessage(
+                "截图中转站",
+                "已最小化到托盘，截图仍会自动捕获；右键托盘图标可退出",
+                QSystemTrayIcon.MessageIcon.Information,
+                3000,
+            )
