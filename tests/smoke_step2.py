@@ -1,4 +1,4 @@
-"""第 2 步冒烟测试：剪贴板闭环（捕获入库 + 复制出去 + 自我过滤）。
+"""第 2 步冒烟测试：剪贴板闭环（捕获入库 + 复制出去 + 自我过滤 + 去重）。
 
 为避免测试改写真实系统剪贴板，向 ClipboardHub 注入假剪贴板/假序号，
 并拦截 _write_os_clipboard 仅记录写出的字节流做校验。
@@ -8,6 +8,7 @@
 2. 复制出去 → 写出的剪贴板数据包含 PNG + DIB 双格式，且内容正确
 3. 复制出去不会导致该图重复入库（自我写入过滤）
 4. 剪贴板是文字等非图片内容 → 静默忽略
+5. 同一次截图触发多次事件（序号连变）→ 只入库一张（序号+指纹双去重）
 
 运行：QT_QPA_PLATFORM=offscreen .venv/Scripts/python.exe tests/smoke_step2.py
 """
@@ -170,6 +171,38 @@ def main() -> int:
     rgba.save(buf, format="PNG")
     dib = png_to_dib_bytes(buf.getvalue())
     check("6.1 RGBA 图转 DIB 成功", struct.unpack("<I", dib[:4])[0] == 40)
+
+    # ===== 用例 7：同一次截图触发多次剪贴板事件 → 只入库一张 =====
+    # （真实场景：截图工具连写多个格式，dataChanged 连发且序号每次都变）
+    count_before7 = len(storage.list())
+    dupe_img = Image.new("RGB", (500, 300), (77, 88, 99))
+    fake_clip.set_image(dupe_img)
+    seq.bump()
+    fake_clip.poke()
+    seq.bump()  # 序号变了，但图是同一张
+    fake_clip.poke()
+    app.processEvents()
+    check("7.1 同图不同序号连发 → 只入库 1 张",
+          len(storage.list()) == count_before7 + 1,
+          f"实际 {len(storage.list())}，期望 {count_before7 + 1}")
+
+    same_seq_img = Image.new("RGB", (111, 222), (1, 2, 3))
+    fake_clip.set_image(same_seq_img)
+    seq.bump()
+    fake_clip.poke()
+    fake_clip.poke()  # 序号不变的重复事件
+    app.processEvents()
+    check("7.2 同序号连发 → 只入库 1 张",
+          len(storage.list()) == count_before7 + 2)
+
+    # 时间窗过后，用户真的又截了一张一模一样的图 → 应当正常入库
+    hub.dupe_window = 0  # 模拟时间窗已过期
+    fake_clip.set_image(dupe_img)
+    seq.bump()
+    fake_clip.poke()
+    app.processEvents()
+    check("7.3 时间窗过后同图可再次入库",
+          len(storage.list()) == count_before7 + 3)
 
     print()
     if failures:
