@@ -11,3 +11,8 @@ tests/_tmp_*/
 # 系统
 Thumbs.db
 .DS_Store
+
+# PyInstaller
+build/
+dist/
+__pycache__/
