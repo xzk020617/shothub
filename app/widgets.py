@@ -6,9 +6,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QPoint, QRect, QSize, Qt, Signal
-from PySide6.QtGui import QPixmap
+from PySide6.QtCore import QMimeData, QPoint, QRect, QSize, Qt, QUrl, Signal
+from PySide6.QtGui import QDrag, QPixmap
 from PySide6.QtWidgets import (
+    QApplication,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -23,6 +24,14 @@ from PySide6.QtWidgets import (
 
 CARD_WIDTH = 176
 THUMB_BOX = 160
+IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp"}
+
+
+def build_file_mimedata(file_path: str) -> QMimeData:
+    """构造"拖出为文件"的 mime 数据（缓存文件真实存在，天然支持 CF_HDROP）。"""
+    mime = QMimeData()
+    mime.setUrls([QUrl.fromLocalFile(file_path)])
+    return mime
 
 
 class FlowLayout(QLayout):
@@ -111,6 +120,7 @@ class ThumbnailCard(QFrame):
         super().__init__(parent)
         self.item_id: str = item.id
         self.file_path: str = item.file_path
+        self._drag_start: QPoint | None = None
         self.setFixedWidth(CARD_WIDTH)
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -186,6 +196,38 @@ class ThumbnailCard(QFrame):
         self._delete_btn.hide()
         self._copy_btn.hide()
         super().leaveEvent(event)
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_start = event.position().toPoint()
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:
+        """按住拖动超过系统阈值 → 以文件形式拖出（可拖进资源管理器/微信等）。"""
+        if (
+            self._drag_start is not None
+            and event.buttons() & Qt.MouseButton.LeftButton
+            and (event.position().toPoint() - self._drag_start).manhattanLength()
+            >= QApplication.startDragDistance()
+        ):
+            self._drag_start = None
+            self._start_drag()
+        super().mouseMoveEvent(event)
+
+    def _start_drag(self) -> None:
+        drag = QDrag(self)
+        drag.setMimeData(build_file_mimedata(self.file_path))
+        pixmap = self._image_label.pixmap()
+        if not pixmap.isNull():
+            drag.setPixmap(
+                pixmap.scaled(
+                    96, 96,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+            )
+            drag.setHotSpot(QPoint(48, 48))
+        drag.exec(Qt.DropAction.CopyAction)
 
     def mouseDoubleClickEvent(self, event) -> None:
         self.activated.emit(self.item_id)

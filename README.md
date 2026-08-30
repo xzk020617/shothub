@@ -5,8 +5,8 @@ Windows 自用的截图临时中转工具：启动后自动捕获截图工具（
 ## 功能进度
 
 - [x] 第 1 步：存储层（manifest 持久化）+ 缩略图网格 + 手动添加 / 单张删除 / 一键清空 / 退出清理
-- [x] 第 2 步：剪贴板闭环——截图自动捕获入库、双击/按钮复制出去（CF_DIB + PNG 双格式、自我写入过滤）
-- [ ] 第 3 步：拖拽双向（拖入 / 拖出为文件）
+- [x] 第 2 步：剪贴板闭环——截图自动捕获入库（序号+内容指纹双重去重）、双击/按钮复制出去（CF_DIB + PNG 双格式、自我写入过滤）
+- [x] 第 3 步：拖拽双向（拖入文件/位图 + 全窗口高亮遮罩，卡片拖出为文件）+ Ctrl+V 粘贴
 - [ ] 第 4 步：托盘常驻 + 单实例 + 崩溃残留清理
 
 完整技术方案见 [Plan.md](Plan.md)。
@@ -25,7 +25,8 @@ python -m venv .venv
 
 ```bash
 .venv\Scripts\python tests\smoke_step1.py   # 存储 + 列表（20 项）
-.venv\Scripts\python tests\smoke_step2.py   # 剪贴板闭环（14 项）
+.venv\Scripts\python tests\smoke_step2.py   # 剪贴板闭环 + 去重（17 项）
+.venv\Scripts\python tests\smoke_step3.py   # 拖拽双向 + 粘贴（23 项）
 ```
 
 ## 技术栈
