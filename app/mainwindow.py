@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (
 
 from .clipboard_hub import ClipboardError, ClipboardHub
 from .storage import StorageManager, StorageError
-from .widgets import IMAGE_SUFFIXES, EmptyState, FlowLayout, ThumbnailCard, build_tray_icon
+from .widgets import IMAGE_SUFFIXES, EmptyState, FlowLayout, ThumbnailCard, app_icon
 
 IMAGE_FILTER = "图片文件 (*.png *.jpg *.jpeg *.bmp *.gif *.webp);;所有文件 (*)"
 
@@ -48,6 +48,7 @@ class MainWindow(QMainWindow):
         self._cards: dict[str, ThumbnailCard] = {}
 
         self.setWindowTitle("截图中转站")
+        self.setWindowIcon(app_icon())
         self.resize(760, 560)
         self.setMinimumSize(420, 320)
 
@@ -364,7 +365,7 @@ class MainWindow(QMainWindow):
         if not QSystemTrayIcon.isSystemTrayAvailable():
             return None
         tray = QSystemTrayIcon(self)
-        tray.setIcon(build_tray_icon())
+        tray.setIcon(app_icon())
         tray.setToolTip("截图中转站")
 
         menu = QMenu()
