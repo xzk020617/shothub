@@ -1,5 +1,7 @@
 # 截图中转站 ShotHub
 
+**当前版本：ver0.1**
+
 Windows 自用的截图临时中转工具：启动后自动捕获截图工具（Win+Shift+S 等）产生的截图，以缩略图墙展示；随时复制回剪贴板或直接拖出使用；退出时自动清理未保留的截图，不占用磁盘。
 
 ## 功能进度
@@ -52,7 +54,7 @@ reg add "HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Run" /v ShotHub /t REG_S
 .venv\Scripts\python tests\smoke_step2.py   # 剪贴板闭环 + 去重（17 项）
 .venv\Scripts\python tests\smoke_step3.py   # 拖拽双向 + 粘贴（23 项）
 .venv\Scripts\python tests\smoke_step4.py   # 托盘 + 单实例 + 退出清理（17 项）
-.venv\Scripts\python tests\smoke_step5.py   # 编辑合并 + 窗口置顶（22 项）
+.venv\Scripts\python tests\smoke_step5.py   # 编辑合并 + 窗口置顶（23 项）
 ```
 
 ## 技术栈
@@ -72,5 +74,5 @@ scripts/
   make_icon.py        # 程序化生成应用图标（icon.ico）
   install.ps1         # 安装 exe + 开始菜单快捷方式
 ShotHub.spec          # PyInstaller 打包配置
-tests/                # 离屏冒烟测试（99 项）
+tests/                # 离屏冒烟测试（100 项）
 ```

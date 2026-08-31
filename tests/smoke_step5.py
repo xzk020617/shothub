@@ -1,7 +1,7 @@
 """第 5 步冒烟测试：编辑合并 + 窗口置顶。
 
 验收标准：
-1. images_similar：同图/小编辑 → 相似；不同内容（同尺寸）→ 不相似
+1. images_similar：同图/小编辑/重度编辑 → 相似；不同内容（同尺寸）→ 不相似
 2. StorageManager.replace_image：原位覆盖原图、重建缩略图、元数据更新、id 不变
 3. 主窗口编辑合并：连续捕获同图的编辑版本 → 仍只有 1 条；捕获不同内容 → 新增
 4. 合并豁免：最新条目是手动添加的、或超出时间窗 → 不合并，正常新增
@@ -70,6 +70,10 @@ def main() -> int:
         other = make_shot(color=(30, 60, 30))  # 同尺寸但内容完全不同
         check("不同内容同尺寸 → 判定不相似", not images_similar(item.file_path, other))
         check("文件不存在 → 判定不相似", not images_similar(tmp / "nope.png", base))
+        heavy = edit_stroke(base)
+        d = ImageDraw.Draw(heavy)  # 重度编辑：大面积马赛克/色块遮盖约 1/4 画面
+        d.rectangle([0, 0, 160, 100], fill=(120, 120, 120))
+        check("重度编辑（大面积遮盖 ~25%）→ 仍判定相似", images_similar(item.file_path, heavy))
 
         # ===== 2. replace_image =====
         old_id, old_path = item.id, item.file_path

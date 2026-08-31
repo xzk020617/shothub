@@ -22,10 +22,10 @@ THUMB_MAX_EDGE = 512
 APP_DIR_NAME = "ShotHub"
 VALID_SOURCES = ("clipboard", "dragin", "paste", "picker")
 
-# 编辑合并：下采样 64×64 后逐像素比较，差异像素占比 ≤15% 视为"同一张图的编辑版本"
+# 编辑合并：下采样 64×64 后逐像素比较，差异像素占比 ≤40% 视为"同一张图的编辑版本"
 SIMILAR_SAMPLE = 64
-SIMILAR_TOLERANCE = 24
-SIMILAR_THRESHOLD = 0.85
+SIMILAR_TOLERANCE = 32
+SIMILAR_THRESHOLD = 0.60
 
 
 def images_similar(file_path, image: Image.Image) -> bool:
