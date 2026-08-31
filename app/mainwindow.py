@@ -1,10 +1,12 @@
 """主窗口：顶栏 + 缩略图网格 + 空状态 + 系统托盘。
 
 功能：手动添加、单张删除、一键清空、剪贴板监听捕获、复制出去、
-拖入/拖出、Ctrl+V 粘贴、托盘常驻（关窗口最小化）、退出清理。
+拖入/拖出、Ctrl+V 粘贴、托盘常驻（关窗口最小化）、退出清理、
+编辑合并（连续编辑只留最终版）、窗口置顶。
 """
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 from PySide6.QtCore import Qt
@@ -26,10 +28,11 @@ from PySide6.QtWidgets import (
 )
 
 from .clipboard_hub import ClipboardError, ClipboardHub
-from .storage import StorageManager, StorageError
+from .storage import StorageManager, StorageError, images_similar
 from .widgets import IMAGE_SUFFIXES, EmptyState, FlowLayout, ThumbnailCard, app_icon
 
 IMAGE_FILTER = "图片文件 (*.png *.jpg *.jpeg *.bmp *.gif *.webp);;所有文件 (*)"
+EDIT_MERGE_WINDOW = 180.0  # 秒：相邻两次剪贴板截图在此时间窗内才可能触发编辑合并
 
 
 def format_size(nbytes: int) -> str:
@@ -72,15 +75,21 @@ class MainWindow(QMainWindow):
         bar.addWidget(self.count_label)
         bar.addStretch(1)
 
+        self.pin_btn = QPushButton("📌 置顶")
+        self.pin_btn.setCheckable(True)
+        self.pin_btn.setToolTip("窗口置顶：悬浮在其他窗口之上")
+        self.pin_btn.toggled.connect(self._toggle_on_top)
         self.add_btn = QPushButton("＋ 添加")
         self.add_btn.clicked.connect(self._on_add)
         self.clear_btn = QPushButton("🗑 清空全部")
         self.clear_btn.clicked.connect(self._on_clear)
-        for btn in (self.add_btn, self.clear_btn):
+        for btn in (self.pin_btn, self.add_btn, self.clear_btn):
             btn.setStyleSheet(
                 "QPushButton { padding: 6px 14px; border: 1px solid #d0d0d8;"
                 " border-radius: 6px; background: white; }"
                 "QPushButton:hover { background: #eef1ff; border-color: #6d8dff; }"
+                "QPushButton:checked { background: #6d8dff; color: white;"
+                " border-color: #6d8dff; }"
                 "QPushButton:disabled { color: #bbb; background: #f5f5f5; }"
             )
             bar.addWidget(btn)
@@ -127,6 +136,7 @@ class MainWindow(QMainWindow):
         # ---------- 系统托盘 ----------
         self._force_quit = False
         self._tray_hint_shown = False
+        self._last_capture_at: float = 0.0  # 上一次剪贴板捕获时间（编辑合并窗口用）
         self.tray = self._create_tray()  # 无系统托盘环境时为 None
 
     # ---------- 卡片管理 ----------
@@ -333,7 +343,37 @@ class MainWindow(QMainWindow):
             self._refresh_state()
 
     def _on_captured(self, image) -> None:
-        """剪贴板捕获到新截图：入库并置顶显示。"""
+        """剪贴板捕获到新截图：编辑合并或新增。
+
+        编辑合并：上一条目是自动捕获、未置顶、尺寸一致、时间窗内且内容高相似
+        （截图工具编辑时每步都会重写剪贴板），则原位更新而不是新增条目，
+        最终只保留关掉编辑器时的那一张。
+        """
+        now = time.monotonic()
+        prev_capture = self._last_capture_at
+        self._last_capture_at = now
+        latest = self.storage.items[0] if self.storage.items else None
+        if (
+            latest is not None
+            and latest.source == "clipboard"
+            and not latest.pinned
+            and now - prev_capture < EDIT_MERGE_WINDOW
+            and (latest.width, latest.height) == image.size
+            and images_similar(latest.file_path, image)
+        ):
+            try:
+                item = self.storage.replace_image(latest.id, image)
+            except StorageError as exc:
+                self.statusBar().showMessage(f"截图更新失败：{exc}", 4000)
+                return
+            card = self._cards.get(item.id)
+            if card is not None:
+                card.refresh(item)
+            self._refresh_state()
+            self.statusBar().showMessage(
+                f"已更新截图 {item.width}×{item.height}（编辑合并）", 2500
+            )
+            return
         try:
             item = self.storage.save_image(image, source="clipboard")
         except StorageError as exc:
@@ -343,6 +383,14 @@ class MainWindow(QMainWindow):
         self._refresh_state()
         self.statusBar().showMessage(
             f"已捕获截图 {item.width}×{item.height}", 2500
+        )
+
+    def _toggle_on_top(self, checked: bool) -> None:
+        """置顶开关：切换 WindowStaysOnTopHint（改窗口标志需重新 show 才生效）。"""
+        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, checked)
+        self.show()
+        self.statusBar().showMessage(
+            "窗口已置顶，悬浮在其他窗口之上" if checked else "已取消置顶", 2000
         )
 
     def _on_activated(self, item_id: str) -> None:

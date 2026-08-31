@@ -8,6 +8,7 @@ Windows 自用的截图临时中转工具：启动后自动捕获截图工具（
 - [x] 第 2 步：剪贴板闭环——截图自动捕获入库（序号+内容指纹双重去重）、双击/按钮复制出去（CF_DIB + PNG 双格式、自我写入过滤）
 - [x] 第 3 步：拖拽双向（拖入文件/位图 + 全窗口高亮遮罩，卡片拖出为文件）+ Ctrl+V 粘贴
 - [x] 第 4 步：托盘常驻（关窗口最小化到托盘、首次气泡提示）+ 单实例（QLocalServer 唤起已有窗口）+ 退出清理/崩溃残留清理
+- [x] 第 5 步：编辑合并（截图工具连续编辑只保留最终版，同尺寸高相似原位替换）+ 窗口置顶按钮
 
 完整技术方案见 [Plan.md](Plan.md)。
 
@@ -51,6 +52,7 @@ reg add "HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Run" /v ShotHub /t REG_S
 .venv\Scripts\python tests\smoke_step2.py   # 剪贴板闭环 + 去重（17 项）
 .venv\Scripts\python tests\smoke_step3.py   # 拖拽双向 + 粘贴（23 项）
 .venv\Scripts\python tests\smoke_step4.py   # 托盘 + 单实例 + 退出清理（17 项）
+.venv\Scripts\python tests\smoke_step5.py   # 编辑合并 + 窗口置顶（22 项）
 ```
 
 ## 技术栈
@@ -70,5 +72,5 @@ scripts/
   make_icon.py        # 程序化生成应用图标（icon.ico）
   install.ps1         # 安装 exe + 开始菜单快捷方式
 ShotHub.spec          # PyInstaller 打包配置
-tests/                # 离屏冒烟测试（77 项）
+tests/                # 离屏冒烟测试（99 项）
 ```
