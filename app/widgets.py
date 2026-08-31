@@ -203,10 +203,10 @@ class ThumbnailCard(QFrame):
             self._image_label.setPixmap(scaled)
         layout.addWidget(self._image_label)
 
-        info = QLabel(f"{item.created_at[11:]} · {item.width}×{item.height}")
-        info.setStyleSheet("color: #888; font-size: 11px; border: none;")
-        info.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(info)
+        self._info_label = QLabel(f"{item.created_at[11:]} · {item.width}×{item.height}")
+        self._info_label.setStyleSheet("color: #888; font-size: 11px; border: none;")
+        self._info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self._info_label)
 
         self._delete_btn = QToolButton(self)
         self._delete_btn.setText("✕")
@@ -238,6 +238,22 @@ class ThumbnailCard(QFrame):
         self._copy_btn.clicked.connect(
             lambda: self.copyRequested.emit(self.item_id)
         )
+
+    def refresh(self, item) -> None:
+        """原位更新（编辑合并后）：重载缩略图与信息，并更新拖出用的文件路径。"""
+        self.file_path = item.file_path
+        pixmap = QPixmap()
+        # 按字节加载而不是传路径，避免任何图像缓存导致旧缩略图残留
+        if pixmap.loadFromData(Path(item.thumb_path).read_bytes()):
+            self._image_label.setPixmap(
+                pixmap.scaled(
+                    THUMB_BOX,
+                    THUMB_BOX,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+            )
+        self._info_label.setText(f"{item.created_at[11:]} · {item.width}×{item.height}")
 
     def enterEvent(self, event) -> None:
         self._delete_btn.show()

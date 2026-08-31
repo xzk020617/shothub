@@ -16,15 +16,42 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
-from PIL import Image
+from PIL import Image, ImageChops
 
 THUMB_MAX_EDGE = 512
 APP_DIR_NAME = "ShotHub"
 VALID_SOURCES = ("clipboard", "dragin", "paste", "picker")
 
+# 编辑合并：下采样 64×64 后逐像素比较，差异像素占比 ≤15% 视为"同一张图的编辑版本"
+SIMILAR_SAMPLE = 64
+SIMILAR_TOLERANCE = 24
+SIMILAR_THRESHOLD = 0.85
+
+
+def images_similar(file_path, image: Image.Image) -> bool:
+    """判断磁盘图片与新图片是否为"同一张截图的编辑版本"。
+
+    思路：双线性缩到 64×64 后比较，编辑（画线/标注/加文字）只改变少量像素，
+    而两张不同的截图即使同尺寸也会有大面积差异。
+    差异像素数取三通道各自超阈值像素数的最大值（保守估计，宁可不合并）。
+    """
+    try:
+        with Image.open(file_path) as a:
+            a = a.convert("RGB").resize((SIMILAR_SAMPLE, SIMILAR_SAMPLE))
+        b = image.convert("RGB").resize((SIMILAR_SAMPLE, SIMILAR_SAMPLE))
+    except (OSError, ValueError):
+        return False
+    hist = ImageChops.difference(a, b).histogram()  # R/G/B 各 256 桶
+    total = SIMILAR_SAMPLE * SIMILAR_SAMPLE
+    changed = max(
+        total - sum(hist[ch * 256 : ch * 256 + SIMILAR_TOLERANCE + 1])
+        for ch in range(3)
+    )
+    return (total - changed) / total >= SIMILAR_THRESHOLD
+
 
 def default_data_root() -> Path:
-    """数据根目录：%LOCALAPPDATA%\\ShotHub，取不到时回退到用户目录。"""
+    """数据根目录：%LOCALAPPDATA%\ShotHub，取不到时回退到用户目录。"""
     base = os.environ.get("LOCALAPPDATA")
     root = Path(base) if base else Path.home() / "AppData" / "Local"
     return root / APP_DIR_NAME
@@ -151,6 +178,23 @@ class StorageManager:
             im.thumbnail((THUMB_MAX_EDGE, THUMB_MAX_EDGE))
             thumb_path.parent.mkdir(parents=True, exist_ok=True)
             im.save(thumb_path, format="PNG")
+
+    def replace_image(self, item_id: str, image: Image.Image) -> Optional[Item]:
+        """原位替换图片内容（编辑合并）：覆盖原图、重建缩略图、更新元数据。"""
+        item = self.get(item_id)
+        if item is None:
+            return None
+        file_path = Path(item.file_path)
+        try:
+            image.save(file_path, format="PNG")
+        except OSError as exc:
+            raise StorageError(f"图片写入失败: {exc}") from exc
+        self._make_thumb(file_path, Path(item.thumb_path))
+        item.width, item.height = image.size
+        item.bytes = file_path.stat().st_size
+        item.created_at = datetime.now().isoformat(timespec="seconds")
+        self._save_manifest()
+        return item
 
     # ---------- 查询 ----------
 
